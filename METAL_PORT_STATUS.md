@@ -100,6 +100,9 @@ threadgroup tile (`N x N+1`) fits Metal's 32 KB threadgroup-memory limit.
    (`lal_reaxff.cpp::loop()`) are still a stub. Mainline LAMMPS has no `reaxff/gpu`
    in the GPU package (only KOKKOS does), so porting the forces is a from-scratch
    effort (bond-order + ~8 energy terms), not a port — the largest remaining task.
+   **See [`REAXFF_FORCES_PLAN.md`](REAXFF_FORCES_PLAN.md)** for the term-by-term
+   roadmap, the required GPU data infrastructure, and the per-term validation
+   harness to build first (start with nonbonded vdW+Coulomb).
    Note the QEq matvec is single precision (Metal has no fp64): the CG solver runs
    in double on the CPU but each A·x is float, so charges match CPU to ~1e-6.
 2. **More pair styles.** Only `lj/cut/gpu` is wired into the Metal `GPU_SOURCES`.
