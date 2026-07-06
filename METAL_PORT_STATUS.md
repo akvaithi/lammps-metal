@@ -8,6 +8,13 @@ supersedes `lammps-metal-core` and `lammps-metal-reaxff`.
 
 ## TL;DR
 
+> **⏸ PAUSED (2026-07-06).** Development is intentionally on hold — see `CLAUDE.md`
+> "STATUS — PAUSED". The working slice below (LJ + GPU neighbor + QEq + nonbonded
+> energy) stands; the remaining ReaxFF **force** terms are a 3–6 month from-scratch
+> build that is not on the coke sim's critical path (its blocker is simulated
+> timescale, not compute). The nonbonded-force WIP lives on branch
+> `wip-nonbonded-forces`, off `main`.
+
 - ✅ **`lj/cut/gpu` on Metal reaches CPU parity.** The 3d LJ melt matches the CPU
   baseline to single-precision tolerance (E_pair −6.7733687 vs −6.7733681 at
   step 0; trajectories track across the full 250-step run).
