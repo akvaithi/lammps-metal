@@ -16,8 +16,11 @@ supersedes `lammps-metal-core` and `lammps-metal-reaxff`.
   masking) are ported; binning runs on the host (hybrid mode), the rest on the GPU
   (`Neighbor list builds = 0` on the CPU side confirms it). A bonded test with
   `special_bonds lj 0 0 0` matches CPU to single-precision tolerance.
-- ⏳ ReaxFF: `reaxff/gpu` + `qeq/reaxff/gpu` register and the QEq matvec kernel
-  runs, but the ReaxFF **force** kernels are not ported yet (see below).
+- ✅ **ReaxFF QEq (charge equilibration) is GPU-accelerated.** `pair reaxff/gpu`
+  runs real ReaxFF (forces on CPU) with the QEq matvec offloaded to Metal
+  (`fix qeq/reaxff/gpu`); a 17k-atom Fluorocarbon test matches all-CPU ReaxFF to
+  single-precision tolerance. Just `-sf gpu -pk gpu 1` (no `newton off`/`neigh no`).
+- ⏳ ReaxFF **force** kernels are not ported yet (forces still run on CPU; see below).
 - Fresh clone builds with no manual steps (cmake generates the kernel headers).
 
 ## Build (macOS, Apple Silicon)
@@ -90,14 +93,15 @@ threadgroup tile (`N x N+1`) fits Metal's 32 KB threadgroup-memory limit.
 
 ## Known limitations / next steps
 
-1. **ReaxFF forces.** `PairReaxFFGPU` inherits the CPU `PairReaxFF` and only
-   offloads the QEq matvec kernel — all ReaxFF forces still run on the CPU
-   (`lal_reaxff.cpp::loop()` is an empty stub). Mainline LAMMPS has no
-   `reaxff/gpu` in the GPU package (only KOKKOS does), so this is a from-scratch
-   effort (bond-order + ~8 energy terms + the CG charge solver), not a port. The
-   tractable, high-value ReaxFF step is finishing the **QEq (charge equilibration)
-   GPU offload**, which builds on the existing `k_qeq_matvec` and is where a large
-   fraction of ReaxFF time goes.
+1. **ReaxFF forces.** `pair reaxff/gpu` now computes forces on the **CPU** (via
+   the parent `PairReaxFF`) and offloads only the **QEq matvec** to the GPU — a
+   real, working configuration (GPU-accelerated charge equilibration + CPU ReaxFF
+   forces), verified against all-CPU ReaxFF. The force kernels themselves
+   (`lal_reaxff.cpp::loop()`) are still a stub. Mainline LAMMPS has no `reaxff/gpu`
+   in the GPU package (only KOKKOS does), so porting the forces is a from-scratch
+   effort (bond-order + ~8 energy terms), not a port — the largest remaining task.
+   Note the QEq matvec is single precision (Metal has no fp64): the CG solver runs
+   in double on the CPU but each A·x is float, so charges match CPU to ~1e-6.
 2. **More pair styles.** Only `lj/cut/gpu` is wired into the Metal `GPU_SOURCES`.
    Porting additional `pair_*_gpu` styles is mostly adding their `.metal` kernel
    and `lal_*` glue; charged styles (`coul`) also exercise the `BaseCharge` path

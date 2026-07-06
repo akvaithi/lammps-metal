@@ -9,8 +9,9 @@ experimental **ReaxFF** Metal work, and supersedes the separate
 > **Read [`METAL_PORT_STATUS.md`](METAL_PORT_STATUS.md) first.** Short version:
 > `lj/cut/gpu` on Metal **matches the CPU baseline** to single-precision tolerance,
 > and the **GPU neighbor build works** (`-pk gpu 1`, no `neigh no`), including
-> **molecular systems with special bonds**. Still to do: the ReaxFF force kernels
-> (only the QEq matvec is offloaded today; forces still run on CPU) and more pair
+> **molecular systems with special bonds**. **ReaxFF runs with GPU-accelerated
+> QEq** (`pair reaxff/gpu` + `fix qeq/reaxff/gpu`: forces on CPU, charge
+> equilibration on the GPU). Still to do: the ReaxFF force kernels and more pair
 > styles.
 
 ## Overview

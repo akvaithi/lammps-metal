@@ -149,6 +149,9 @@ void ReaxFFGPU<numtyp, acctyp>::qeq_matvec(int nn, int *ilist, int *mask, double
 
   // We must set size on the command queue before running
   k_qeq_matvec.set_size(grid_size, block_size, this->device->gpu->cq());
+#ifdef UCL_METAL_DEBUG
+  { static int c=0; if(c++<1) fprintf(stderr,"[QEQ] k_qeq_matvec running on GPU (inum=%d)\n", nn); }
+#endif
   k_qeq_matvec.run();
   this->device->gpu->sync();
   
