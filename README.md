@@ -1,11 +1,21 @@
-# LAMMPS Metal Port (ReaxFF)
+# LAMMPS Metal Port
 
-This repository serves as the active development branch for porting the complex **ReaxFF** force field (via `fix qeq/reaxff/gpu` and `pair reaxff/gpu`) to Apple Silicon using the Metal API. 
+Native **Apple Metal** backend for LAMMPS's `GPU` package on Apple Silicon
+(M1/M2/M3), via a `metal-cpp` UCL/Geryon translation layer — no OpenCL or CUDA.
+This is the **unified** repo: it contains both the core LJ port and the
+experimental **ReaxFF** Metal work, and supersedes the separate
+`lammps-metal-core` and `lammps-metal-reaxff` repositories.
+
+> **Read [`METAL_PORT_STATUS.md`](METAL_PORT_STATUS.md) first** — it documents
+> the build, the current parity state, and a precise bisection of the remaining
+> LJ argument-binding bug. Short version: the port **builds and runs**, but
+> `lj/cut/gpu` is **not yet at CPU parity** (scalar kernel arguments are bound
+> incorrectly), and ReaxFF forces are not ported yet and depend on that same fix.
 
 ## Overview
 ReaxFF is an empirical, bond-order dependent force field that requires many intricate computational stages, including a Charge Equilibration (QEq) solver.
 
-This repository builds upon the `lammps-metal-core` UCL translation layer and injects the ReaxFF-specific kernels.
+The ReaxFF-specific kernels build on top of the same UCL→Metal translation layer.
 
 ### Current Status
 - **Core Metal Infrastructure**: The base `UCL` wrapper for Metal (`mtl_cuda_stubs.h`, `metal-cpp-impl.cpp`) is complete and stable.

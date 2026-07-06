@@ -50,8 +50,16 @@ kernel void k_lj(
     uint thread_index_in_threadgroup [[thread_index_in_threadgroup]])
 {
     int ii = tid;
-    if (ii >= inum) return;
 
+    acctyp4 f = {0.0, 0.0, 0.0, 0.0};
+    acctyp energy = 0.0;
+    acctyp virial[6] = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0};
+
+    // The grid is rounded up to full threadgroups, so some threads have ii >= inum.
+    // They must NOT read the neighbor list, but they DO fall through to the
+    // threadgroup reduction below with zero contribution (returning early here would
+    // leave their shared-memory slot uninitialized and corrupt the reduced sum).
+    if (ii < inum) {
     int i = dev_nbor[ii];
     numtyp4 ix = x_[i];
     int itype = (int)ix.w;
@@ -72,10 +80,6 @@ kernel void k_lj(
         nbor_end = nbor_begin + numj;
         n_stride = t_per_atom;
     }
-
-    acctyp4 f = {0.0, 0.0, 0.0, 0.0};
-    acctyp energy = 0.0;
-    acctyp virial[6] = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0};
 
     for (int nbor = nbor_begin; nbor < nbor_end; nbor += n_stride) {
         int j = dev_packed[nbor];
@@ -116,9 +120,10 @@ kernel void k_lj(
             }
         }
     }
+    } // end if (ii < inum) — reduction below runs for all threads
 
     if (eflag == 2) {
-        engv[ii] = energy * 0.5f;
+        if (ii < inum) engv[ii] = energy * 0.5f;
     } else if (eflag == 1) {
         threadgroup acctyp local_eng[1024];
         local_eng[thread_index_in_threadgroup] = energy;
@@ -131,9 +136,11 @@ kernel void k_lj(
     }
     
     if (vflag == 2) {
-        int v_offset = inum;
-        for(int v=0; v<6; ++v) {
-            engv[v_offset + v * inum + ii] = virial[v] * 0.5f;
+        if (ii < inum) {
+            int v_offset = inum;
+            for(int v=0; v<6; ++v) {
+                engv[v_offset + v * inum + ii] = virial[v] * 0.5f;
+            }
         }
     } else if (vflag == 1) {
         threadgroup acctyp local_vir[6][1024];
@@ -152,7 +159,7 @@ kernel void k_lj(
             }
         }
     }
-    ans[ii] = packed_float3(f.x, f.y, f.z);
+    if (ii < inum) ans[ii] = packed_float3(f.x, f.y, f.z);
 }
 
 kernel void k_lj_fast(
@@ -175,9 +182,17 @@ kernel void k_lj_fast(
     uint threadgroups_per_grid [[threadgroups_per_grid]],
     uint thread_index_in_threadgroup [[thread_index_in_threadgroup]]
 ) {
-    int ii = tid; 
-    if (ii >= inum) return;
+    int ii = tid;
 
+    acctyp4 f = {0.0, 0.0, 0.0, 0.0};
+    acctyp energy = 0.0;
+    acctyp virial[6] = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0};
+
+    // The grid is rounded up to full threadgroups, so some threads have ii >= inum.
+    // They must NOT read the neighbor list, but they DO fall through to the
+    // threadgroup reduction below with zero contribution (returning early here would
+    // leave their shared-memory slot uninitialized and corrupt the reduced sum).
+    if (ii < inum) {
     int i = dev_nbor[ii];
     numtyp4 ix = x_[i];
     int itype = (int)ix.w;
@@ -198,10 +213,6 @@ kernel void k_lj_fast(
         nbor_end = nbor_begin + numj;
         n_stride = t_per_atom;
     }
-
-    acctyp4 f = {0.0, 0.0, 0.0, 0.0};
-    acctyp energy = 0.0;
-    acctyp virial[6] = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0};
 
     for (int nbor = nbor_begin; nbor < nbor_end; nbor += n_stride) {
         int j = dev_packed[nbor];
@@ -242,9 +253,10 @@ kernel void k_lj_fast(
             }
         }
     }
+    } // end if (ii < inum) — reduction below runs for all threads
 
     if (eflag == 2) {
-        engv[ii] = energy * 0.5f;
+        if (ii < inum) engv[ii] = energy * 0.5f;
     } else if (eflag == 1) {
         threadgroup acctyp local_eng[1024];
         local_eng[thread_index_in_threadgroup] = energy;
@@ -257,9 +269,11 @@ kernel void k_lj_fast(
     }
     
     if (vflag == 2) {
-        int v_offset = inum;
-        for(int v=0; v<6; ++v) {
-            engv[v_offset + v * inum + ii] = virial[v] * 0.5f;
+        if (ii < inum) {
+            int v_offset = inum;
+            for(int v=0; v<6; ++v) {
+                engv[v_offset + v * inum + ii] = virial[v] * 0.5f;
+            }
         }
     } else if (vflag == 1) {
         threadgroup acctyp local_vir[6][1024];
@@ -278,5 +292,5 @@ kernel void k_lj_fast(
             }
         }
     }
-    ans[ii] = packed_float3(f.x, f.y, f.z);
+    if (ii < inum) ans[ii] = packed_float3(f.x, f.y, f.z);
 }

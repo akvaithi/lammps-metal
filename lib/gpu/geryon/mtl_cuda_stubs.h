@@ -8,6 +8,14 @@
 #include <unordered_map>
 #include <iostream>
 
+// Per-kernel-launch tracing. Off by default (it prints ~250 lines for a 250-step
+// LJ melt); build with -DUCL_METAL_DEBUG to re-enable. Real errors still use cerr.
+#ifdef UCL_METAL_DEBUG
+#define MTL_DBG(...) printf(__VA_ARGS__)
+#else
+#define MTL_DBG(...) ((void)0)
+#endif
+
 namespace ucl_metal {
     extern std::unordered_map<void*, MTL::Buffer*> ucl_metal_buffers;
 }
@@ -157,7 +165,7 @@ inline int cuModuleGetFunction(CUfunction* func, CUmodule mod, const char* name)
         if (err) std::cerr << "Failed to create pipeline: " << err->localizedDescription()->utf8String() << std::endl;
         return 1;
     }
-    printf("cuModuleGetFunction success for %s\n", name);
+    MTL_DBG("cuModuleGetFunction success for %s\n", name);
     fflush(stdout);
     return 0; 
 }
@@ -218,16 +226,16 @@ inline int cuLaunchKernel(CUfunction f,
             size_t offset = 0;
             if (resolve_metal_buffer(ptr, buf, offset)) {
                 enc->setBuffer(buf, offset, i);
-                printf("Arg %d: IS DEVICE PTR, val=%p buf=%p offset=%zu\n", i, (void*)ptr, (void*)buf, offset);
+                MTL_DBG("Arg %d: IS DEVICE PTR, val=%p buf=%p offset=%zu\n", i, (void*)ptr, (void*)buf, offset);
             } else {
                 enc->setBuffer(nullptr, 0, i);
-                printf("Arg %d: DEVICE PTR NOT FOUND in tracking, val=%p\n", i, (void*)ptr);
+                MTL_DBG("Arg %d: DEVICE PTR NOT FOUND in tracking, val=%p\n", i, (void*)ptr);
             }
         } else {
             enc->setBytes(kernelParams[i], argSizes[i], i);
-            printf("Arg %d: IS VALUE, size=%zu\n", i, argSizes[i]);
+            MTL_DBG("Arg %d: IS VALUE, size=%zu\n", i, argSizes[i]);
             if (argSizes[i] == 4 && i == 3) {
-                printf("GPU lj_types = %d\n", *(int*)kernelParams[i]);
+                MTL_DBG("GPU lj_types = %d\n", *(int*)kernelParams[i]);
             }
         }
     }
@@ -238,12 +246,18 @@ inline int cuLaunchKernel(CUfunction f,
     // Get inum to determine grid size. Wait, LAMMPS cuLaunchKernel wrapper might pass grid dims.
     // In UCL_Kernel, grid and block are passed to cuLaunchKernel.
     unsigned int inum = gridDimX * blockDimX; // approximate, just for logging
-    printf("cuLaunchKernel: gridDimX=%d blockDimX=%d numArgs=%d\n", gridDimX, blockDimX, numArgs);
-    printf("GPU ainum = %d, inum = %d\n", gridDimX * blockDimX, inum);
+    MTL_DBG("cuLaunchKernel: gridDimX=%d blockDimX=%d numArgs=%d\n", gridDimX, blockDimX, numArgs);
+    MTL_DBG("GPU ainum = %d, inum = %d\n", gridDimX * blockDimX, inum);
     fflush(stdout);
-    MTL::Size grid = MTL::Size::Make(gridDimX * blockDimX, gridDimY * blockDimY, gridDimZ * blockDimZ);
+    // Dispatch full, uniform threadgroups (CUDA grid-of-blocks semantics): gridDim
+    // is the number of threadgroups, blockDim the threads per group. This keeps every
+    // threadgroup at the full (power-of-two) block size so in-kernel threadgroup
+    // reductions are correct, and makes threadgroups_per_grid == gridDimX == the host's
+    // red_blocks (the stride the Answer readback assumes). Out-of-range threads
+    // (thread_position_in_grid >= inum) must be guarded inside each kernel.
+    MTL::Size tgroups = MTL::Size::Make(gridDimX, gridDimY, gridDimZ);
     MTL::Size block = MTL::Size::Make(blockDimX, blockDimY, blockDimZ);
-    enc->dispatchThreads(grid, block);
+    enc->dispatchThreadgroups(tgroups, block);
     enc->endEncoding();
     cb->commit();
     cb->waitUntilCompleted();
@@ -276,7 +290,7 @@ inline int cuMemcpyDtoHAsync(void* dst, const void* src, size_t size, CUstream s
     memcpy(dst, src, size); 
     if (size >= 16) {
         float* f = (float*)dst;
-        printf("DtoH copy size=%zu, first 4 floats: %f %f %f %f\n", size, f[0], f[1], f[2], f[3]);
+        MTL_DBG("DtoH copy size=%zu, first 4 floats: %f %f %f %f\n", size, f[0], f[1], f[2], f[3]);
     }
     return 0; 
 }

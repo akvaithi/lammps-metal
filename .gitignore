@@ -7,6 +7,10 @@
 *_ptx.h
 *.a
 *.d
+# the *.d rule above accidentally matches the cmake/etc/profile.d directory,
+# which holds tracked install templates the build needs — keep them.
+!cmake/etc/profile.d/
+!cmake/etc/profile.d/*
 *.x
 *.exe
 *.sif

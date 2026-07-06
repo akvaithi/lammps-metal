@@ -150,7 +150,6 @@ int LJT::loop(const int eflag, const int vflag) {
   int ainum = this->ans->inum();
   int nbor_pitch = this->nbor->nbor_pitch();
   this->time_pair.start();
-  printf("GPU ainum = %d, inum = %d\n", ainum, ainum);
   if (shared_types) {
     this->k_pair_sel->set_size(GX,BX);
     this->k_pair_sel->run(&this->atom->x, &lj1, &lj3, &sp_lj,

@@ -95,3 +95,16 @@ with open("neighbor_cpu_cubin.h", "w") as f:
 with open("neighbor_gpu_cubin.h", "w") as f:
     f.write('const char *neighbor_gpu = R"METAL(' + neighbor_gpu_metal + ')METAL";\n')
 
+# device_cubin.h, lj_cubin.h and reaxff_cubin.h wrap the standalone .metal shader
+# files (rather than an inline string) into the `const char *` symbol their .cpp
+# expects. reaxff.metal only exists in the ReaxFF-enabled tree, so skip it if absent.
+_metal_dir = os.path.dirname(os.path.abspath(__file__))
+for _var, _src in (("device", "device.metal"), ("lj", "lj.metal"), ("reaxff", "reaxff.metal")):
+    _path = os.path.join(_metal_dir, _src)
+    if not os.path.exists(_path):
+        continue
+    with open(_path) as f:
+        _body = f.read()
+    with open(os.path.join(_metal_dir, _var + "_cubin.h"), "w") as f:
+        f.write('const char *%s = R"METAL(%s)METAL";\n' % (_var, _body))
+

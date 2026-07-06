@@ -502,8 +502,20 @@ elseif(GPU_API STREQUAL "HIP")
     target_link_libraries(hip_get_devices PRIVATE ${CUDA_LIBRARIES} ${CUDA_CUDA_LIBRARY})
   endif()
 elseif(GPU_API STREQUAL "METAL")
+  # The Metal kernels are compiled at runtime from source strings embedded in
+  # generated *_cubin.h headers (device_cubin.h, lj_cubin.h, atom_cubin.h,
+  # neighbor_cpu_cubin.h, neighbor_gpu_cubin.h). These are gitignored generated
+  # files, so run the generator now to guarantee a fresh checkout builds.
+  execute_process(
+    COMMAND ${Python_EXECUTABLE} generate_metals.py
+    WORKING_DIRECTORY ${LAMMPS_LIB_SOURCE_DIR}/gpu
+    RESULT_VARIABLE _metal_gen_result)
+  if(NOT _metal_gen_result EQUAL 0)
+    message(FATAL_ERROR "Failed to generate Metal *_cubin.h headers (lib/gpu/generate_metals.py)")
+  endif()
+
   add_executable(nvc_get_devices ${LAMMPS_LIB_SOURCE_DIR}/gpu/geryon/ucl_get_devices.cpp ${LAMMPS_LIB_SOURCE_DIR}/gpu/metal-cpp-impl.cpp)
-  
+
   # For Phase 1 proof of concept, only compile the minimum necessary files
   set(GPU_LIB_SOURCES
     ${LAMMPS_LIB_SOURCE_DIR}/gpu/lal_device.cpp
