@@ -1,0 +1,19 @@
+LAMMPS (4 Jul 2026)
+cuModuleLoadDataEx called
+cuModuleLoadDataEx success
+cuModuleGetFunction called for kernel_zero
+cuModuleGetFunction success for kernel_zero
+cuModuleGetFunction called for kernel_info
+cuModuleGetFunction success for kernel_info
+Arg 0: IS DEVICE PTR, val=0x110208000 buf=0x103533500 offset=0
+cuLaunchKernel: gridDimX=1 blockDimX=1 numArgs=1
+GPU ainum = 1, inum = 1
+ptx_arch: 9, gpu->arch: 9
+Passed ptx_arch check
+Config id set
+Simd size set
+Finished assigning variables
+Passed configuration check
+Finished compile_kernels and serialize_init
+Setting up auto cell size
+Finished neighbor auto cell size

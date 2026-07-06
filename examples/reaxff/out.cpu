@@ -1,0 +1,29 @@
+LAMMPS (4 Jul 2026)
+Reading data file ...
+  orthogonal box = (35 35 35) to (48 48 48)
+  1 by 1 by 1 MPI processor grid
+  reading atoms ...
+  21 atoms
+  read_data CPU = 0.000 seconds
+WARNING: Ignoring inactive control parameter: simulation_name (src/REAXFF/reaxff_control.cpp:94)
+WARNING: Ignoring inactive control parameter: energy_update_freq (src/REAXFF/reaxff_control.cpp:94)
+WARNING: Support for writing native trajectories has been removed after LAMMPS version 8 April 2021 (src/REAXFF/reaxff_control.cpp:109)
+WARNING: Ignoring inactive control parameter: traj_title (src/REAXFF/reaxff_control.cpp:94)
+WARNING: Ignoring inactive control parameter: atom_info (src/REAXFF/reaxff_control.cpp:94)
+WARNING: Ignoring inactive control parameter: atom_forces (src/REAXFF/reaxff_control.cpp:94)
+WARNING: Ignoring inactive control parameter: atom_velocities (src/REAXFF/reaxff_control.cpp:94)
+WARNING: Ignoring inactive control parameter: bond_info (src/REAXFF/reaxff_control.cpp:94)
+WARNING: Ignoring inactive control parameter: angle_info (src/REAXFF/reaxff_control.cpp:94)
+Reading potential file ffield.reax with DATE: 2010-02-19
+
+CITE-CITE-CITE-CITE-CITE-CITE-CITE-CITE-CITE-CITE-CITE-CITE-CITE
+
+Your simulation uses code contributions which should be cited:
+- pair reaxff command: https://doi.org/10.1016/j.parco.2011.08.005
+- fix qeq/reaxff command: https://doi.org/10.1016/j.parco.2011.08.005
+The log file lists these citations in BibTeX format.
+
+CITE-CITE-CITE-CITE-CITE-CITE-CITE-CITE-CITE-CITE-CITE-CITE-CITE
+
+ERROR: Pair style reaxff requires newton pair on (src/REAXFF/pair_reaxff.cpp:365)
+Last input line: run 100
