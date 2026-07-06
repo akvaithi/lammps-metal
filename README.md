@@ -8,9 +8,10 @@ experimental **ReaxFF** Metal work, and supersedes the separate
 
 > **Read [`METAL_PORT_STATUS.md`](METAL_PORT_STATUS.md) first.** Short version:
 > `lj/cut/gpu` on Metal **matches the CPU baseline** to single-precision tolerance,
-> and the **GPU neighbor build works** (`-pk gpu 1`, no `neigh no` needed for
-> non-bonded systems). Still to do: `kernel_special` for molecular/special-bond
-> systems, and the ReaxFF force kernels (QEq matvec is ported; forces are not).
+> and the **GPU neighbor build works** (`-pk gpu 1`, no `neigh no`), including
+> **molecular systems with special bonds**. Still to do: the ReaxFF force kernels
+> (only the QEq matvec is offloaded today; forces still run on CPU) and more pair
+> styles.
 
 ## Overview
 ReaxFF is an empirical, bond-order dependent force field that requires many intricate computational stages, including a Charge Equilibration (QEq) solver.

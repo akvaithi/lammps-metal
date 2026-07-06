@@ -26,7 +26,7 @@ kernel void kernel_info(
     info[11] = 256; // BLOCK_ELLIPSE
     info[12] = 256; // PPPM_BLOCK_1D
     info[13] = 256; // BLOCK_NBOR_BUILD
-    info[14] = 256; // BLOCK_CELL_2D
+    info[14] = 16; // BLOCK_CELL_2D (transpose tile; keep small, threadgroup tile is NxN+1)
     info[15] = 256; // BLOCK_CELL_ID
     info[16] = 8; // MAX_SHARED_TYPES
     info[17] = 8; // MAX_BIO_SHARED_TYPES

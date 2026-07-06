@@ -205,15 +205,137 @@ kernel void calc_neigh_list_cell(
     } // for ii
 }
 
-// The remaining GPU-neighbor kernels are only used for the full-GPU-binning path
-// (calc_cell_id/kernel_calc_cell_counts) or bonded systems with special bonds
-// (transpose/kernel_special). Neither is exercised by the Metal hybrid path yet,
-// but they must exist as valid functions for set_function(). TODO: implement
-// kernel_special for correct handling of molecular (special-bond) systems.
+// calc_cell_id / kernel_calc_cell_counts belong to the full-GPU-binning path
+// (gpu_nbor==1), which Metal never uses (no device radix sort -> hybrid binning on
+// the host). They must exist as valid functions for set_function() but are unused.
 kernel void calc_cell_id() {}
 kernel void kernel_calc_cell_counts() {}
-kernel void transpose() {}
-kernel void kernel_special() {}
+
+// SBBITS: special-bond flag bits live in the top 2 bits of each neighbor index;
+// the pair kernels read sp_lj[(j >> SBBITS) & 3] to scale 1-2/1-3/1-4 pairs.
+#define SBBITS 30
+
+// Transpose the (maxspecial x nt) special-neighbor matrix so kernel_special can
+// read it column-major (special[ii + k*nt]). Tile size is BLOCK_CELL_2D (== the
+// host launch block, device.metal kernel_info[14]); the +1 avoids bank conflicts.
+#define BLOCK_CELL_2D 16
+kernel void transpose(
+    device int *out           [[buffer(0)]],
+    device const int *in      [[buffer(1)]],
+    constant int &columns_in  [[buffer(2)]],
+    constant int &rows_in     [[buffer(3)]],
+    constant int &shift       [[buffer(4)]],
+    uint2 tpitg [[thread_position_in_threadgroup]],
+    uint2 tgid  [[threadgroup_position_in_grid]])
+{
+    threadgroup int block[BLOCK_CELL_2D][BLOCK_CELL_2D+1];
+    int ti=(int)tpitg.x, tj=(int)tpitg.y;
+    int bi=(int)tgid.x,  bj=(int)tgid.y;
+
+    int i=bi*BLOCK_CELL_2D+ti;
+    int j=bj*BLOCK_CELL_2D+tj;
+    if ((i<columns_in) && (j+shift<rows_in))
+        block[tj][ti]=in[(j+shift)*columns_in+i];
+
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+
+    i=bj*BLOCK_CELL_2D+ti;
+    j=bi*BLOCK_CELL_2D+tj;
+    if ((i+shift<rows_in) && (j<columns_in))
+        out[j*rows_in+i+shift]=block[ti][tj];
+}
+
+// True when the (dx,dy,dz) separation is longer than half the box in a periodic
+// dimension, i.e. the "neighbor" is actually a periodic image and must NOT be
+// masked as a special (bonded) partner.
+inline int minimum_image_check(float dx, float dy, float dz,
+                               float xprd_half, float yprd_half, float zprd_half,
+                               int xperiodic, int yperiodic, int zperiodic) {
+    if (xperiodic && fabs(dx) > xprd_half) return 1;
+    if (yperiodic && fabs(dy) > yprd_half) return 1;
+    if (zperiodic && fabs(dz) > zprd_half) return 1;
+    return 0;
+}
+
+// Mark special (1-2/1-3/1-4 bonded) neighbors in the GPU-built neighbor list by
+// XOR-ing the which-flag into the top SBBITS, so the pair kernels scale them via
+// sp_lj. 17-argument version (with positions + periodicity/minimum-image), matching
+// the kernel_special that lal_neighbor.cpp's build_nbor_list launches. `special` is
+// the transposed array from transpose() above, read column-major as special[ii+k*nt].
+kernel void kernel_special(
+    device const float4 *x_         [[buffer(0)]],
+    device int *dev_nbor            [[buffer(1)]],
+    device int *host_nbor_list      [[buffer(2)]],
+    device const int *host_numj     [[buffer(3)]],
+    device const int *tag           [[buffer(4)]],
+    device const int *nspecial      [[buffer(5)]],
+    device const int *special       [[buffer(6)]],
+    constant int &inum              [[buffer(7)]],
+    constant int &nt                [[buffer(8)]],
+    constant int &max_nbors         [[buffer(9)]],
+    constant int &t_per_atom        [[buffer(10)]],
+    constant float &xprd_half       [[buffer(11)]],
+    constant float &yprd_half       [[buffer(12)]],
+    constant float &zprd_half       [[buffer(13)]],
+    constant int &xperiodic         [[buffer(14)]],
+    constant int &yperiodic         [[buffer(15)]],
+    constant int &zperiodic         [[buffer(16)]],
+    uint tpitg [[thread_position_in_threadgroup]],
+    uint tgid  [[threadgroup_position_in_grid]],
+    uint tptg  [[threads_per_threadgroup]])
+{
+    int tid = (int)tpitg;
+    int ii  = (int)tgid * ((int)tptg / t_per_atom);
+    ii += tid / t_per_atom;
+    int offset = tid & (t_per_atom-1);
+
+    if (ii < nt) {
+        int n1 = nspecial[ii*3];
+        int n2 = nspecial[ii*3+1];
+        int n3 = nspecial[ii*3+2];
+        float4 atom_i = x_[ii];
+
+        int stride, myj;
+        device int *list;
+        if (ii < inum) {
+            stride = inum;
+            list = dev_nbor + stride + ii;
+            int numj = *list;
+            list += stride + ii*(t_per_atom-1);
+            stride = inum*t_per_atom;
+            myj = numj / t_per_atom;
+            if (offset < (numj & (t_per_atom-1))) myj++;
+            list += offset;
+        } else {
+            stride = 1;
+            list = host_nbor_list + (ii-inum)*max_nbors;
+            myj = host_numj[ii-inum];
+        }
+
+        for (int m = 0; m < myj; m++) {
+            int nbor = *list;
+            int jtag = tag[nbor];
+            float4 jpos = x_[nbor];
+            for (int k = 0; k < n3; k++) {
+                if (special[ii + k*nt] == jtag) {
+                    int which = 1;
+                    if (k >= n1) which++;
+                    if (k >= n2) which++;
+                    float dx = atom_i.x - jpos.x;
+                    float dy = atom_i.y - jpos.y;
+                    float dz = atom_i.z - jpos.z;
+                    if (minimum_image_check(dx, dy, dz, xprd_half, yprd_half,
+                                            zprd_half, xperiodic, yperiodic,
+                                            zperiodic) != 1)
+                        nbor = nbor ^ (which << SBBITS);
+                    break;
+                }
+            }
+            *list = nbor;
+            list += stride;
+        }
+    }
+}
 """
 
 with open("atom_cubin.h", "w") as f:

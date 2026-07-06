@@ -11,12 +11,13 @@ supersedes `lammps-metal-core` and `lammps-metal-reaxff`.
 - ✅ **`lj/cut/gpu` on Metal reaches CPU parity.** The 3d LJ melt matches the CPU
   baseline to single-precision tolerance (E_pair −6.7733687 vs −6.7733681 at
   step 0; trajectories track across the full 250-step run).
-- ✅ **GPU neighbor build works** — no more `neigh no` needed for non-bonded
-  systems. The cell-list `calc_neigh_list_cell` kernel is ported; binning runs on
-  the host (hybrid mode), the neighbor build runs on the GPU (`Neighbor list
-  builds = 0` on the CPU side confirms it), and results match CPU.
+- ✅ **GPU neighbor build works**, including **molecular / special-bond systems**.
+  `calc_neigh_list_cell` (build), `transpose` and `kernel_special` (1-2/1-3/1-4
+  masking) are ported; binning runs on the host (hybrid mode), the rest on the GPU
+  (`Neighbor list builds = 0` on the CPU side confirms it). A bonded test with
+  `special_bonds lj 0 0 0` matches CPU to single-precision tolerance.
 - ⏳ ReaxFF: `reaxff/gpu` + `qeq/reaxff/gpu` register and the QEq matvec kernel
-  runs, but the ReaxFF **force** kernels are not ported yet.
+  runs, but the ReaxFF **force** kernels are not ported yet (see below).
 - Fresh clone builds with no manual steps (cmake generates the kernel headers).
 
 ## Build (macOS, Apple Silicon)
@@ -79,24 +80,28 @@ Apple Metal has no device radix sort, so LAMMPS falls back to **hybrid** neighbo
 mode (`gpu_nbor==2`, forced in `lal_device.cpp`): the host computes cell ids,
 cell counts (prefix sum) and bins the atoms, then the GPU runs
 `calc_neigh_list_cell` (the `LAL_USE_OLD_NEIGHBOR` shared-memory version) to build
-the packed neighbor list. That one kernel is implemented in
-`generate_metals.py`'s `neighbor_gpu` program; `calc_cell_id` /
-`kernel_calc_cell_counts` (full-GPU-binning path) and `transpose` /
-`kernel_special` (special-bond handling) remain stubs.
+the packed neighbor list, and `transpose` + `kernel_special` mask special
+(1-2/1-3/1-4) bonded pairs. All three are implemented in `generate_metals.py`'s
+`neighbor_gpu` program. `calc_cell_id` / `kernel_calc_cell_counts` (the full-GPU
+binning path, `gpu_nbor==1`) stay stubs — Metal never uses them.
+
+Note: `BLOCK_CELL_2D` is set to 16 in `device.metal` (was 256) so the `transpose`
+threadgroup tile (`N x N+1`) fits Metal's 32 KB threadgroup-memory limit.
 
 ## Known limitations / next steps
 
-1. **Molecular (special-bond) systems.** `kernel_special` is still a stub, so
-   systems with bond/angle exclusions (`special_bonds`) won't have those pairs
-   masked on the GPU. Non-bonded systems (LJ, and ReaxFF, which has no fixed
-   topology) are unaffected. Porting `kernel_special` + `transpose` is the next
-   neighbor-side task.
-2. **ReaxFF forces.** Only the QEq matvec kernel is ported. The bond-order and
-   force kernels in `reaxff.metal` need to be written. They now sit on a working,
-   parity-verified single-precision foundation with a working GPU neighbor list.
-3. **More pair styles.** Only `lj/cut/gpu` is wired into the Metal `GPU_SOURCES`.
+1. **ReaxFF forces.** `PairReaxFFGPU` inherits the CPU `PairReaxFF` and only
+   offloads the QEq matvec kernel — all ReaxFF forces still run on the CPU
+   (`lal_reaxff.cpp::loop()` is an empty stub). Mainline LAMMPS has no
+   `reaxff/gpu` in the GPU package (only KOKKOS does), so this is a from-scratch
+   effort (bond-order + ~8 energy terms + the CG charge solver), not a port. The
+   tractable, high-value ReaxFF step is finishing the **QEq (charge equilibration)
+   GPU offload**, which builds on the existing `k_qeq_matvec` and is where a large
+   fraction of ReaxFF time goes.
+2. **More pair styles.** Only `lj/cut/gpu` is wired into the Metal `GPU_SOURCES`.
    Porting additional `pair_*_gpu` styles is mostly adding their `.metal` kernel
-   and `lal_*` glue.
+   and `lal_*` glue; charged styles (`coul`) also exercise the `BaseCharge` path
+   that ReaxFF's QEq needs.
 
 ## Upstreaming notes
 Goal is to contribute this Metal backend to LAMMPS. Before a PR: implement GPU
