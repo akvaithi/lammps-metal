@@ -7,11 +7,10 @@ experimental **ReaxFF** Metal work, and supersedes the separate
 `lammps-metal-core` and `lammps-metal-reaxff` repositories.
 
 > **Read [`METAL_PORT_STATUS.md`](METAL_PORT_STATUS.md) first.** Short version:
-> `lj/cut/gpu` on Metal now **matches the CPU baseline** to single-precision
-> tolerance (the blocker was a float/double precision mismatch on the answer
-> buffers — Metal has no fp64, so the backend forces single precision). Still to
-> do: GPU neighbor-build kernels (run with `-pk gpu 1 neigh no` for now) and the
-> ReaxFF force kernels (QEq matvec is ported; forces are not).
+> `lj/cut/gpu` on Metal **matches the CPU baseline** to single-precision tolerance,
+> and the **GPU neighbor build works** (`-pk gpu 1`, no `neigh no` needed for
+> non-bonded systems). Still to do: `kernel_special` for molecular/special-bond
+> systems, and the ReaxFF force kernels (QEq matvec is ported; forces are not).
 
 ## Overview
 ReaxFF is an empirical, bond-order dependent force field that requires many intricate computational stages, including a Charge Equilibration (QEq) solver.

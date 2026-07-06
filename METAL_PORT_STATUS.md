@@ -11,6 +11,10 @@ supersedes `lammps-metal-core` and `lammps-metal-reaxff`.
 - ✅ **`lj/cut/gpu` on Metal reaches CPU parity.** The 3d LJ melt matches the CPU
   baseline to single-precision tolerance (E_pair −6.7733687 vs −6.7733681 at
   step 0; trajectories track across the full 250-step run).
+- ✅ **GPU neighbor build works** — no more `neigh no` needed for non-bonded
+  systems. The cell-list `calc_neigh_list_cell` kernel is ported; binning runs on
+  the host (hybrid mode), the neighbor build runs on the GPU (`Neighbor list
+  builds = 0` on the CPU side confirms it), and results match CPU.
 - ⏳ ReaxFF: `reaxff/gpu` + `qeq/reaxff/gpu` register and the QEq matvec kernel
   runs, but the ReaxFF **force** kernels are not ported yet.
 - Fresh clone builds with no manual steps (cmake generates the kernel headers).
@@ -28,13 +32,12 @@ cmake --build . -j8
 auto-runs `lib/gpu/generate_metals.py` to produce the generated `*_cubin.h`
 kernel-string headers (they are gitignored).
 
-Run the LJ parity example — **use `neigh no`** (CPU neighbor build; the GPU
-neighbor kernels are still stubs):
+Run the LJ parity example (GPU neighbor build; `neigh no` no longer required):
 
 ```bash
 cd ../examples/melt
-../../build/lmp -in in.melt                               # CPU baseline
-../../build/lmp -sf gpu -pk gpu 1 neigh no -in in.melt    # Metal (matches)
+../../build/lmp -in in.melt                       # CPU baseline
+../../build/lmp -sf gpu -pk gpu 1 -in in.melt     # Metal (matches)
 ```
 
 ## The bug that blocked LJ parity: precision mismatch (fixed)
@@ -70,15 +73,27 @@ answer buffers.)
   semantics) so `threadgroups_per_grid == gridDimX == the host's red_blocks`.
 - ~250 lines/run of per-launch `printf` tracing gated behind `-DUCL_METAL_DEBUG`.
 
+## GPU neighbor build (how it works on Metal)
+
+Apple Metal has no device radix sort, so LAMMPS falls back to **hybrid** neighbor
+mode (`gpu_nbor==2`, forced in `lal_device.cpp`): the host computes cell ids,
+cell counts (prefix sum) and bins the atoms, then the GPU runs
+`calc_neigh_list_cell` (the `LAL_USE_OLD_NEIGHBOR` shared-memory version) to build
+the packed neighbor list. That one kernel is implemented in
+`generate_metals.py`'s `neighbor_gpu` program; `calc_cell_id` /
+`kernel_calc_cell_counts` (full-GPU-binning path) and `transpose` /
+`kernel_special` (special-bond handling) remain stubs.
+
 ## Known limitations / next steps
 
-1. **GPU neighbor build is a stub.** The `neighbor_gpu` kernels in
-   `generate_metals.py` are empty no-ops, so the default GPU neighbor build does
-   nothing — always run Metal with `-pk gpu 1 neigh no` (CPU neighbor build).
-   Implementing the GPU binning/neighbor kernels is the next core-infra task.
+1. **Molecular (special-bond) systems.** `kernel_special` is still a stub, so
+   systems with bond/angle exclusions (`special_bonds`) won't have those pairs
+   masked on the GPU. Non-bonded systems (LJ, and ReaxFF, which has no fixed
+   topology) are unaffected. Porting `kernel_special` + `transpose` is the next
+   neighbor-side task.
 2. **ReaxFF forces.** Only the QEq matvec kernel is ported. The bond-order and
    force kernels in `reaxff.metal` need to be written. They now sit on a working,
-   parity-verified single-precision foundation.
+   parity-verified single-precision foundation with a working GPU neighbor list.
 3. **More pair styles.** Only `lj/cut/gpu` is wired into the Metal `GPU_SOURCES`.
    Porting additional `pair_*_gpu` styles is mostly adding their `.metal` kernel
    and `lal_*` glue.
