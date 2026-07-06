@@ -64,6 +64,20 @@ class ReaxFFGPU : public BaseCharge<numtyp, acctyp> {
                         const float *p_rcore, const float *p_gamma, const float *p_lgcij,
                         const float *p_lgre, float c_ele, float p_vdW1, int vdw_type,
                         int lgflag, double &e_vdW_out, double &e_ele_out);
+
+  // Nonbonded pairwise forces -> per-atom f_out (length 3*nall).
+  UCL_Kernel k_reaxff_nb_force;
+  UCL_D_Vec<int> d_ai, d_aj;
+  UCL_D_Vec<float> d_dvx, d_dvy, d_dvz, d_force;
+  int _nbf_cap = 0, _nbf_nall = 0;
+  void nonbonded_force(int npairs, const int *ai, const int *aj, const float *dvx,
+                       const float *dvy, const float *dvz, const float *rij,
+                       const float *qiqj, const int *mtype, const float *Tap, int nt2,
+                       const float *p_D, const float *p_alpha, const float *p_rvdW,
+                       const float *p_gammaw, const float *p_ecore, const float *p_acore,
+                       const float *p_rcore, const float *p_gamma, const float *p_lgcij,
+                       const float *p_lgre, float c_ele, float p_vdW1, int vdw_type,
+                       int lgflag, int nall, float *f_out);
 };
 
 }
