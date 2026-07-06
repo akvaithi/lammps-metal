@@ -6,11 +6,12 @@ This is the **unified** repo: it contains both the core LJ port and the
 experimental **ReaxFF** Metal work, and supersedes the separate
 `lammps-metal-core` and `lammps-metal-reaxff` repositories.
 
-> **Read [`METAL_PORT_STATUS.md`](METAL_PORT_STATUS.md) first** — it documents
-> the build, the current parity state, and a precise bisection of the remaining
-> LJ argument-binding bug. Short version: the port **builds and runs**, but
-> `lj/cut/gpu` is **not yet at CPU parity** (scalar kernel arguments are bound
-> incorrectly), and ReaxFF forces are not ported yet and depend on that same fix.
+> **Read [`METAL_PORT_STATUS.md`](METAL_PORT_STATUS.md) first.** Short version:
+> `lj/cut/gpu` on Metal now **matches the CPU baseline** to single-precision
+> tolerance (the blocker was a float/double precision mismatch on the answer
+> buffers — Metal has no fp64, so the backend forces single precision). Still to
+> do: GPU neighbor-build kernels (run with `-pk gpu 1 neigh no` for now) and the
+> ReaxFF force kernels (QEq matvec is ported; forces are not).
 
 ## Overview
 ReaxFF is an empirical, bond-order dependent force field that requires many intricate computational stages, including a Charge Equilibration (QEq) solver.

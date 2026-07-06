@@ -502,6 +502,16 @@ elseif(GPU_API STREQUAL "HIP")
     target_link_libraries(hip_get_devices PRIVATE ${CUDA_LIBRARIES} ${CUDA_CUDA_LIBRARY})
   endif()
 elseif(GPU_API STREQUAL "METAL")
+  # Apple Metal has no fp64, so the shaders always use 32-bit acctyp/numtyp.
+  # The host must match: a mixed/double build makes the host read 8-byte doubles
+  # from the engv/force buffers the kernels write as 4-byte floats, which silently
+  # corrupts all energies/forces. Force SINGLE precision for the Metal backend.
+  if(NOT GPU_PREC_SETTING STREQUAL "SINGLE_SINGLE")
+    message(WARNING "GPU_API=metal requires single precision (Apple Metal has no fp64); overriding GPU_PREC to 'single'.")
+    set(GPU_PREC_SETTING "SINGLE_SINGLE")
+    set(GPU_PREC "SINGLE")
+  endif()
+
   # The Metal kernels are compiled at runtime from source strings embedded in
   # generated *_cubin.h headers (device_cubin.h, lj_cubin.h, atom_cubin.h,
   # neighbor_cpu_cubin.h, neighbor_gpu_cubin.h). These are gitignored generated
