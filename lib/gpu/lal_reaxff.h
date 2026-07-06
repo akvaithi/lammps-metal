@@ -42,10 +42,18 @@ class ReaxFFGPU : public BaseCharge<numtyp, acctyp> {
   UCL_D_Vec<float> d_val;
   UCL_D_Vec<float> d_x;
   UCL_D_Vec<float> d_b;
-  
+
   void qeq_matvec(int nn, int *ilist, int *mask, double *eta, int *type,
                   int *firstnbr, int *numnbrs, int *jlist, double *val,
                   double *x, double *b, int ntypes, int nall, int m_fill, int groupbit);
+
+  // Nonbonded (Coulomb energy) validation step for the ReaxFF force port.
+  UCL_Kernel k_reaxff_coul;
+  UCL_D_Vec<float> d_qiqj, d_rij, d_gamma, d_tap, d_eout;
+  bool _coul_alloc = false;
+  // Returns sum over `npairs` counted pairs of the ReaxFF electrostatic energy.
+  double coul_energy(int npairs, const float *qiqj, const float *rij,
+                     const float *gamma_ij, const float *Tap, float c_ele);
 };
 
 }

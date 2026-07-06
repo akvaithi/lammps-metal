@@ -83,6 +83,11 @@ void reaxff_qeq_matvec(int nn, int *ilist, int *mask, double *eta, int *type,
   REAXFFMF.qeq_matvec(nn, ilist, mask, eta, type, firstnbr, numnbrs, jlist, val, x, b, ntypes, nall, m_fill, groupbit);
 }
 
+double reaxff_gpu_coul_energy(int npairs, const float *qiqj, const float *rij,
+                              const float *gamma_ij, const float *Tap, float c_ele) {
+  return REAXFFMF.coul_energy(npairs, qiqj, rij, gamma_ij, Tap, c_ele);
+}
+
 void reaxff_gpu_compute(const int ago, const int inum, const int nall, double **host_x,
                         int *host_type, int *ilist, int *numj, int **firstneigh,
                         const bool eflag, const bool vflag, const bool eatom, const bool vatom,

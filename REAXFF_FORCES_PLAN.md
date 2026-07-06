@@ -1,8 +1,16 @@
 # Porting ReaxFF forces to Metal — implementation plan
 
-**Status:** not started. `pair reaxff/gpu` currently computes forces on the CPU
-(via the parent `PairReaxFF`) and offloads only the QEq matvec. This document is
-the roadmap for moving the ReaxFF **force/energy** computation itself onto the GPU.
+**Status:** in progress. `pair reaxff/gpu` computes forces on the CPU (via the
+parent `PairReaxFF`) and offloads the QEq matvec. The **nonbonded Coulomb energy**
+is now computed on the GPU and validated against CPU (`REAXFF_GPU_VALIDATE_NB=1`;
+`k_reaxff_coul` in `reaxff.metal`, `ReaxFFGPU::coul_energy` in `lal_reaxff.cpp`,
+extraction in `pair_reaxff_gpu.cpp::compute`). This document is the roadmap for the
+rest of the ReaxFF **force/energy** computation.
+
+Progress against the order below: **validation harness — done** (compares GPU vs
+`my_en.e_ele`). **Step 2 (nonbonded) — Coulomb energy validated**; remaining:
+vdW energy (add the shielded/core/lg terms to the same kernel), then the pairwise
+**forces** (CEvd/CEclmb along dvec), then actually offload it (skip on CPU).
 
 Read this before writing any force kernel. ReaxFF is intricate and tightly
 coupled; the difference between "looks right" and "is right" is invisible without

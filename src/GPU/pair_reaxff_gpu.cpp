@@ -15,10 +15,16 @@
 #include "suffix.h"
 #include "update.h"
 
+#include "reaxff_api.h"
+#include <cstdlib>
+#include <vector>
+
 // External functions from GPU library for ReaxFF
 int reaxff_gpu_init(const int ntypes, const int nlocal, const int nall, const int max_nbors,
                     int &gpu_mode, FILE *screen);
 void reaxff_gpu_clear();
+double reaxff_gpu_coul_energy(int npairs, const float *qiqj, const float *rij,
+                              const float *gamma_ij, const float *Tap, float c_ele);
 void reaxff_gpu_compute(const int ago, const int inum, const int nall, double **host_x,
                         int *host_type, int *ilist, int *numj, int **firstneigh,
                         const bool eflag, const bool vflag, const bool eatom, const bool vatom,
@@ -56,6 +62,64 @@ void PairReaxFFGPU::compute(int eflag, int vflag)
   // makes `pair reaxff/gpu` real ReaxFF with a GPU-accelerated QEq, rather than a
   // zero-force stub, until the force kernels land.
   PairReaxFF::compute(eflag, vflag);
+
+  // Nonbonded (Coulomb) energy validation: recompute the ReaxFF electrostatic
+  // energy on the GPU from the far-neighbor list ReaxFF just built, and compare to
+  // the CPU value (my_en.e_ele). Enable with REAXFF_GPU_VALIDATE_NB=1. This
+  // validates the GPU nonbonded pipeline before the term is actually offloaded;
+  // see REAXFF_FORCES_PLAN.md.
+  if (std::getenv("REAXFF_GPU_VALIDATE_NB")) {
+    using namespace ReaxFF;
+    reax_system  *sys  = api->system;
+    reax_list    *fnb  = api->lists + FAR_NBRS;
+    storage      *ws   = api->workspace;
+    const double  nonb_cut = api->control->nonb_cut;
+    const double  SMALL = 0.0001;
+    const int     natoms = sys->n;
+
+    std::vector<float> qiqj, rij, gam;
+    qiqj.reserve(natoms * 64); rij.reserve(natoms * 64); gam.reserve(natoms * 64);
+    for (int i = 0; i < natoms; ++i) {
+      const int ti = sys->my_atoms[i].type;
+      if (ti < 0) continue;
+      const rc_tagint orig_i = sys->my_atoms[i].orig_id;
+      const double qi = sys->my_atoms[i].q;
+      const int start = Start_Index(i, fnb), end = End_Index(i, fnb);
+      for (int pj = start; pj < end; ++pj) {
+        far_neighbor_data *nbr = &fnb->select.far_nbr_list[pj];
+        const int j = nbr->nbr;
+        const int tj = sys->my_atoms[j].type;
+        if (tj < 0) continue;
+        const rc_tagint orig_j = sys->my_atoms[j].orig_id;
+        int flag = 0;
+        if (nbr->d <= nonb_cut) {
+          if (j < natoms) flag = 1;
+          else if (orig_i < orig_j) flag = 1;
+          else if (orig_i == orig_j) {
+            if (nbr->dvec[2] > SMALL) flag = 1;
+            else if (fabs(nbr->dvec[2]) < SMALL) {
+              if (nbr->dvec[1] > SMALL) flag = 1;
+              else if (fabs(nbr->dvec[1]) < SMALL && nbr->dvec[0] > SMALL) flag = 1;
+            }
+          }
+        }
+        if (flag) {
+          qiqj.push_back((float)(qi * sys->my_atoms[j].q));
+          rij.push_back((float)nbr->d);
+          gam.push_back((float)sys->reax_param.tbp[ti][tj].gamma);
+        }
+      }
+    }
+    float Tap[8];
+    for (int k = 0; k < 8; ++k) Tap[k] = (float)ws->Tap[k];
+    const double e_ele_gpu = reaxff_gpu_coul_energy((int)qiqj.size(), qiqj.data(),
+                                                    rij.data(), gam.data(), Tap, (float)C_ele);
+    const double e_ele_cpu = api->data->my_en.e_ele;
+    if (screen)
+      fprintf(screen, "[NB-VALIDATE] npairs=%zu  e_ele CPU=%.6f  GPU=%.6f  rel=%.3e\n",
+              qiqj.size(), e_ele_cpu, e_ele_gpu,
+              fabs(e_ele_cpu - e_ele_gpu) / (fabs(e_ele_cpu) + 1e-30));
+  }
   return;
 
   ev_init(eflag, vflag);

@@ -35,9 +35,60 @@ int ReaxFFGPU<numtyp, acctyp>::init(const int ntypes, const int inum, const int 
   if (success != UCL_SUCCESS) return success;
 
   k_qeq_matvec.set_function(*(this->reaxff_program), "k_qeq_matvec");
-  
+  k_reaxff_coul.set_function(*(this->reaxff_program), "k_reaxff_coul");
+
   _allocated = true;
   return 0;
+}
+
+// Sum the ReaxFF electrostatic energy over a host-provided list of counted pairs.
+// Energy-only validation of the nonbonded term against the CPU my_en.e_ele.
+template <class numtyp, class acctyp>
+double ReaxFFGPUT::coul_energy(int npairs, const float *qiqj, const float *rij,
+                               const float *gamma_ij, const float *Tap, float c_ele) {
+  if (npairs <= 0) return 0.0;
+  if (!_coul_alloc || (int)d_qiqj.numel() < npairs) {
+    if (_coul_alloc) { d_qiqj.clear(); d_rij.clear(); d_gamma.clear(); d_eout.clear(); }
+    d_qiqj.alloc(npairs, *(this->device->gpu), UCL_READ_ONLY);
+    d_rij.alloc(npairs, *(this->device->gpu), UCL_READ_ONLY);
+    d_gamma.alloc(npairs, *(this->device->gpu), UCL_READ_ONLY);
+    d_eout.alloc(npairs, *(this->device->gpu), UCL_WRITE_ONLY);
+    if (!_coul_alloc) d_tap.alloc(8, *(this->device->gpu), UCL_READ_ONLY);
+    _coul_alloc = true;
+  }
+
+  UCL_H_Vec<float> h_qiqj, h_rij, h_gamma, h_tap, h_eout;
+  h_qiqj.view(const_cast<float*>(qiqj), npairs, *(this->device->gpu));
+  h_rij.view(const_cast<float*>(rij), npairs, *(this->device->gpu));
+  h_gamma.view(const_cast<float*>(gamma_ij), npairs, *(this->device->gpu));
+  h_tap.view(const_cast<float*>(Tap), 8, *(this->device->gpu));
+  std::vector<float> eout(npairs, 0.0f);
+  h_eout.view(eout.data(), npairs, *(this->device->gpu));
+
+  ucl_copy(d_qiqj, h_qiqj, false);
+  ucl_copy(d_rij, h_rij, false);
+  ucl_copy(d_gamma, h_gamma, false);
+  ucl_copy(d_tap, h_tap, false);
+
+  k_reaxff_coul.clear_args();
+  k_reaxff_coul.add_arg(&d_qiqj);
+  k_reaxff_coul.add_arg(&d_rij);
+  k_reaxff_coul.add_arg(&d_gamma);
+  k_reaxff_coul.add_arg(&d_tap);
+  k_reaxff_coul.add_arg(&c_ele);
+  k_reaxff_coul.add_arg(&npairs);
+  k_reaxff_coul.add_arg(&d_eout);
+
+  int block_size = 256;
+  int grid_size = (npairs + block_size - 1) / block_size;
+  k_reaxff_coul.set_size(grid_size, block_size, this->device->gpu->cq());
+  k_reaxff_coul.run();
+  this->device->gpu->sync();
+
+  ucl_copy(h_eout, d_eout, false);
+  double e = 0.0;
+  for (int p = 0; p < npairs; ++p) e += eout[p];
+  return e;
 }
 
 template <class numtyp, class acctyp>
