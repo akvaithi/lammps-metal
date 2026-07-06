@@ -47,13 +47,23 @@ class ReaxFFGPU : public BaseCharge<numtyp, acctyp> {
                   int *firstnbr, int *numnbrs, int *jlist, double *val,
                   double *x, double *b, int ntypes, int nall, int m_fill, int groupbit);
 
-  // Nonbonded (Coulomb energy) validation step for the ReaxFF force port.
-  UCL_Kernel k_reaxff_coul;
-  UCL_D_Vec<float> d_qiqj, d_rij, d_gamma, d_tap, d_eout;
-  bool _coul_alloc = false;
-  // Returns sum over `npairs` counted pairs of the ReaxFF electrostatic energy.
-  double coul_energy(int npairs, const float *qiqj, const float *rij,
-                     const float *gamma_ij, const float *Tap, float c_ele);
+  // Nonbonded (vdW + Coulomb energy) validation step for the ReaxFF force port.
+  UCL_Kernel k_reaxff_nonbonded;
+  UCL_D_Vec<float> d_qiqj, d_rij, d_tap, d_evdw_out, d_eele_out;
+  UCL_D_Vec<int> d_mtype;
+  UCL_D_Vec<float> d_pD, d_palpha, d_prvdW, d_pgammaw, d_pecore, d_pacore,
+                   d_prcore, d_pgamma, d_plgcij, d_plgre;
+  bool _nb_alloc = false;
+  int _nb_cap = 0, _nt2_cap = 0;
+  // Sum the ReaxFF nonbonded energy over `npairs` counted pairs; params are flat
+  // per-type-pair tables of length nt2 = NT*NT. Returns e_vdW and e_ele.
+  void nonbonded_energy(int npairs, const float *qiqj, const float *rij,
+                        const int *mtype, const float *Tap, int nt2,
+                        const float *p_D, const float *p_alpha, const float *p_rvdW,
+                        const float *p_gammaw, const float *p_ecore, const float *p_acore,
+                        const float *p_rcore, const float *p_gamma, const float *p_lgcij,
+                        const float *p_lgre, float c_ele, float p_vdW1, int vdw_type,
+                        int lgflag, double &e_vdW_out, double &e_ele_out);
 };
 
 }

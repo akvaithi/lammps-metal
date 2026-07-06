@@ -83,9 +83,16 @@ void reaxff_qeq_matvec(int nn, int *ilist, int *mask, double *eta, int *type,
   REAXFFMF.qeq_matvec(nn, ilist, mask, eta, type, firstnbr, numnbrs, jlist, val, x, b, ntypes, nall, m_fill, groupbit);
 }
 
-double reaxff_gpu_coul_energy(int npairs, const float *qiqj, const float *rij,
-                              const float *gamma_ij, const float *Tap, float c_ele) {
-  return REAXFFMF.coul_energy(npairs, qiqj, rij, gamma_ij, Tap, c_ele);
+void reaxff_gpu_nonbonded_energy(int npairs, const float *qiqj, const float *rij,
+                                 const int *mtype, const float *Tap, int nt2,
+                                 const float *p_D, const float *p_alpha, const float *p_rvdW,
+                                 const float *p_gammaw, const float *p_ecore, const float *p_acore,
+                                 const float *p_rcore, const float *p_gamma, const float *p_lgcij,
+                                 const float *p_lgre, float c_ele, float p_vdW1, int vdw_type,
+                                 int lgflag, double *e_vdW_out, double *e_ele_out) {
+  REAXFFMF.nonbonded_energy(npairs, qiqj, rij, mtype, Tap, nt2, p_D, p_alpha, p_rvdW,
+                            p_gammaw, p_ecore, p_acore, p_rcore, p_gamma, p_lgcij, p_lgre,
+                            c_ele, p_vdW1, vdw_type, lgflag, *e_vdW_out, *e_ele_out);
 }
 
 void reaxff_gpu_compute(const int ago, const int inum, const int nall, double **host_x,

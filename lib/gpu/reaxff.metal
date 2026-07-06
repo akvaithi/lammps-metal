@@ -7,22 +7,39 @@ kernel void k_reaxff_stub(uint threadgroup_position_in_grid [[threadgroup_positi
     // Stub kernel so init_atomic doesn't fail
 }
 
-// ReaxFF electrostatic (Coulomb) energy per counted pair, matching
-// reaxff_nonbonded.cpp: e_ele = C_ele * qi*qj * Tap(r) / (r^3 + gamma)^(1/3),
-// where Tap is the 7th-order taper (Horner form, Tap[7] is the r^7 coeff) and
-// `gamma` is the tbp gamma parameter (already stored as gamma^-3). Host sums the
-// per-pair output in double. Energy-only validation step for the ReaxFF force port.
-kernel void k_reaxff_coul(device const float* qiqj     [[buffer(0)]],
-                          device const float* rij      [[buffer(1)]],
-                          device const float* gamma_ij [[buffer(2)]],
-                          device const float* Tap      [[buffer(3)]],
-                          constant float& C_ele        [[buffer(4)]],
-                          constant int& npairs         [[buffer(5)]],
-                          device float* e_out          [[buffer(6)]],
-                          uint p [[thread_position_in_grid]])
+// ReaxFF nonbonded (van der Waals + Coulomb) energy per counted pair, matching
+// reaxff_nonbonded.cpp::vdW_Coulomb_Energy. Two-body parameters are passed as
+// flat per-type-pair tables indexed by mtype = ti*NT + tj; Tap is the 7th-order
+// taper (Horner, Tap[7] is the r^7 coeff); `gamma` is the tbp gamma (stored as
+// gamma^-3). Host sums the per-pair outputs in double. Energy-only validation
+// step for the ReaxFF force port (forces come next).
+kernel void k_reaxff_nonbonded(device const float* qiqj    [[buffer(0)]],
+                               device const float* rij     [[buffer(1)]],
+                               device const int*   mtype   [[buffer(2)]],
+                               device const float* Tap     [[buffer(3)]],
+                               device const float* p_D     [[buffer(4)]],
+                               device const float* p_alpha [[buffer(5)]],
+                               device const float* p_rvdW  [[buffer(6)]],
+                               device const float* p_gammaw[[buffer(7)]],
+                               device const float* p_ecore [[buffer(8)]],
+                               device const float* p_acore [[buffer(9)]],
+                               device const float* p_rcore [[buffer(10)]],
+                               device const float* p_gamma [[buffer(11)]],
+                               device const float* p_lgcij [[buffer(12)]],
+                               device const float* p_lgre  [[buffer(13)]],
+                               constant float& C_ele       [[buffer(14)]],
+                               constant float& p_vdW1      [[buffer(15)]],
+                               constant int& vdw_type      [[buffer(16)]],
+                               constant int& lgflag        [[buffer(17)]],
+                               constant int& npairs        [[buffer(18)]],
+                               device float* evdw_out      [[buffer(19)]],
+                               device float* eele_out      [[buffer(20)]],
+                               uint p [[thread_position_in_grid]])
 {
     if ((int)p >= npairs) return;
     float r = rij[p];
+    int m = mtype[p];
+
     float Tap_v = Tap[7]*r + Tap[6];
     Tap_v = Tap_v*r + Tap[5];
     Tap_v = Tap_v*r + Tap[4];
@@ -30,9 +47,34 @@ kernel void k_reaxff_coul(device const float* qiqj     [[buffer(0)]],
     Tap_v = Tap_v*r + Tap[2];
     Tap_v = Tap_v*r + Tap[1];
     Tap_v = Tap_v*r + Tap[0];
-    float dr3gamij_1 = r*r*r + gamma_ij[p];
-    float dr3gamij_3 = pow(dr3gamij_1, 0.33333333333333f);
-    e_out[p] = C_ele * qiqj[p] * Tap_v / dr3gamij_3;
+
+    // van der Waals
+    float e_vdW;
+    if (vdw_type == 1 || vdw_type == 3) {   // shielding
+        float p_vdW1i = 1.0f / p_vdW1;
+        float powr  = pow(r, p_vdW1);
+        float powgi = pow(1.0f / p_gammaw[m], p_vdW1);
+        float fn13  = pow(powr + powgi, p_vdW1i);
+        float x     = 1.0f - fn13 / p_rvdW[m];
+        e_vdW = p_D[m] * (exp(p_alpha[m]*x) - 2.0f*exp(0.5f*p_alpha[m]*x));
+    } else {                                 // no shielding
+        float x = 1.0f - r / p_rvdW[m];
+        e_vdW = p_D[m] * (exp(p_alpha[m]*x) - 2.0f*exp(0.5f*p_alpha[m]*x));
+    }
+    float e_nb = Tap_v * e_vdW;
+    if (vdw_type == 2 || vdw_type == 3) {    // inner-wall core
+        float e_core = p_ecore[m] * exp(p_acore[m] * (1.0f - r/p_rcore[m]));
+        e_nb += Tap_v * e_core;
+        if (lgflag) {                        // lg dispersion correction
+            float r6 = pow(r, 6.0f), re6 = pow(p_lgre[m], 6.0f);
+            e_nb += Tap_v * (-(p_lgcij[m] / (r6 + re6)));
+        }
+    }
+    evdw_out[p] = e_nb;
+
+    // Coulomb
+    float dr3gamij_3 = pow(r*r*r + p_gamma[m], 0.33333333333333f);
+    eele_out[p] = C_ele * qiqj[p] * Tap_v / dr3gamij_3;
 }
 
 kernel void k_qeq_matvec(device const int* ilist [[buffer(0)]],

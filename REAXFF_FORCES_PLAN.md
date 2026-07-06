@@ -8,9 +8,14 @@ extraction in `pair_reaxff_gpu.cpp::compute`). This document is the roadmap for 
 rest of the ReaxFF **force/energy** computation.
 
 Progress against the order below: **validation harness — done** (compares GPU vs
-`my_en.e_ele`). **Step 2 (nonbonded) — Coulomb energy validated**; remaining:
-vdW energy (add the shielded/core/lg terms to the same kernel), then the pairwise
-**forces** (CEvd/CEclmb along dvec), then actually offload it (skip on CPU).
+`my_en.e_vdW`/`e_ele`). **Step 2 (nonbonded) — vdW + Coulomb ENERGY validated**
+(`k_reaxff_nonbonded`). Caveat: the FC test field is `vdw_type=1` (shielding, no
+inner-wall core, no lg), so the `vdw_type` 2/3 core term and the lg-dispersion term
+are coded from `reaxff_nonbonded.cpp` but not yet exercised — validate them against
+a `vdw_type=2/3` (and `lgvdw yes`) force field before relying on them. Remaining for
+this term: the pairwise **forces** (CEvd/CEclmb along `dvec`, with the `dTap`
+taper-derivative and `dfn13`), then actually **offload** it (skip the term on the CPU
+and add its energy/forces to LAMMPS via the pair accumulators).
 
 Read this before writing any force kernel. ReaxFF is intricate and tightly
 coupled; the difference between "looks right" and "is right" is invisible without

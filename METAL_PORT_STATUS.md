@@ -20,9 +20,10 @@ supersedes `lammps-metal-core` and `lammps-metal-reaxff`.
   runs real ReaxFF (forces on CPU) with the QEq matvec offloaded to Metal
   (`fix qeq/reaxff/gpu`); a 17k-atom Fluorocarbon test matches all-CPU ReaxFF to
   single-precision tolerance. Just `-sf gpu -pk gpu 1` (no `newton off`/`neigh no`).
-- 🟡 ReaxFF **forces**: first term in progress. The nonbonded **Coulomb energy** is
-  now computed on the GPU and validated against CPU ReaxFF (17k-atom FC: 1.77M
-  pairs, rel. err 5.6e-6). The rest of the force terms still run on CPU (see below).
+- 🟡 ReaxFF **forces**: first term in progress. The full nonbonded **energy**
+  (van der Waals + Coulomb) is computed on the GPU and validated against CPU ReaxFF
+  (17k-atom FC: 1.77M pairs; e_vdW rel. err 1.2e-7, e_ele 5.8e-6). Forces for this
+  term, and all other terms, still run on CPU (see below).
 - Fresh clone builds with no manual steps (cmake generates the kernel headers).
 
 ## Build (macOS, Apple Silicon)

@@ -35,60 +35,84 @@ int ReaxFFGPU<numtyp, acctyp>::init(const int ntypes, const int inum, const int 
   if (success != UCL_SUCCESS) return success;
 
   k_qeq_matvec.set_function(*(this->reaxff_program), "k_qeq_matvec");
-  k_reaxff_coul.set_function(*(this->reaxff_program), "k_reaxff_coul");
+  k_reaxff_nonbonded.set_function(*(this->reaxff_program), "k_reaxff_nonbonded");
 
   _allocated = true;
   return 0;
 }
 
-// Sum the ReaxFF electrostatic energy over a host-provided list of counted pairs.
-// Energy-only validation of the nonbonded term against the CPU my_en.e_ele.
+// Sum the ReaxFF nonbonded (vdW + Coulomb) energy over a host-provided list of
+// counted pairs. Energy-only validation against CPU my_en.e_vdW / my_en.e_ele.
 template <class numtyp, class acctyp>
-double ReaxFFGPUT::coul_energy(int npairs, const float *qiqj, const float *rij,
-                               const float *gamma_ij, const float *Tap, float c_ele) {
-  if (npairs <= 0) return 0.0;
-  if (!_coul_alloc || (int)d_qiqj.numel() < npairs) {
-    if (_coul_alloc) { d_qiqj.clear(); d_rij.clear(); d_gamma.clear(); d_eout.clear(); }
-    d_qiqj.alloc(npairs, *(this->device->gpu), UCL_READ_ONLY);
-    d_rij.alloc(npairs, *(this->device->gpu), UCL_READ_ONLY);
-    d_gamma.alloc(npairs, *(this->device->gpu), UCL_READ_ONLY);
-    d_eout.alloc(npairs, *(this->device->gpu), UCL_WRITE_ONLY);
-    if (!_coul_alloc) d_tap.alloc(8, *(this->device->gpu), UCL_READ_ONLY);
-    _coul_alloc = true;
+void ReaxFFGPUT::nonbonded_energy(int npairs, const float *qiqj, const float *rij,
+                                  const int *mtype, const float *Tap, int nt2,
+                                  const float *p_D, const float *p_alpha, const float *p_rvdW,
+                                  const float *p_gammaw, const float *p_ecore, const float *p_acore,
+                                  const float *p_rcore, const float *p_gamma, const float *p_lgcij,
+                                  const float *p_lgre, float c_ele, float p_vdW1, int vdw_type,
+                                  int lgflag, double &e_vdW_out, double &e_ele_out) {
+  e_vdW_out = e_ele_out = 0.0;
+  if (npairs <= 0) return;
+  auto *dev = this->device->gpu;
+  if (!_nb_alloc || npairs > _nb_cap) {
+    if (_nb_alloc) { d_qiqj.clear(); d_rij.clear(); d_mtype.clear(); d_evdw_out.clear(); d_eele_out.clear(); }
+    d_qiqj.alloc(npairs, *dev, UCL_READ_ONLY);
+    d_rij.alloc(npairs, *dev, UCL_READ_ONLY);
+    d_mtype.alloc(npairs, *dev, UCL_READ_ONLY);
+    d_evdw_out.alloc(npairs, *dev, UCL_WRITE_ONLY);
+    d_eele_out.alloc(npairs, *dev, UCL_WRITE_ONLY);
+    _nb_cap = npairs;
   }
+  if (!_nb_alloc || nt2 > _nt2_cap) {
+    if (_nb_alloc) { d_pD.clear(); d_palpha.clear(); d_prvdW.clear(); d_pgammaw.clear();
+                     d_pecore.clear(); d_pacore.clear(); d_prcore.clear(); d_pgamma.clear();
+                     d_plgcij.clear(); d_plgre.clear(); }
+    d_pD.alloc(nt2,*dev,UCL_READ_ONLY);     d_palpha.alloc(nt2,*dev,UCL_READ_ONLY);
+    d_prvdW.alloc(nt2,*dev,UCL_READ_ONLY);  d_pgammaw.alloc(nt2,*dev,UCL_READ_ONLY);
+    d_pecore.alloc(nt2,*dev,UCL_READ_ONLY); d_pacore.alloc(nt2,*dev,UCL_READ_ONLY);
+    d_prcore.alloc(nt2,*dev,UCL_READ_ONLY); d_pgamma.alloc(nt2,*dev,UCL_READ_ONLY);
+    d_plgcij.alloc(nt2,*dev,UCL_READ_ONLY); d_plgre.alloc(nt2,*dev,UCL_READ_ONLY);
+    _nt2_cap = nt2;
+  }
+  if (!_nb_alloc) d_tap.alloc(8, *dev, UCL_READ_ONLY);
+  _nb_alloc = true;
 
-  UCL_H_Vec<float> h_qiqj, h_rij, h_gamma, h_tap, h_eout;
-  h_qiqj.view(const_cast<float*>(qiqj), npairs, *(this->device->gpu));
-  h_rij.view(const_cast<float*>(rij), npairs, *(this->device->gpu));
-  h_gamma.view(const_cast<float*>(gamma_ij), npairs, *(this->device->gpu));
-  h_tap.view(const_cast<float*>(Tap), 8, *(this->device->gpu));
-  std::vector<float> eout(npairs, 0.0f);
-  h_eout.view(eout.data(), npairs, *(this->device->gpu));
+  // wrap + copy a host pointer of length n into a device vector
+  auto up_f = [&](UCL_D_Vec<float> &d, const float *h, int n) {
+    UCL_H_Vec<float> v; v.view(const_cast<float*>(h), n, *dev); ucl_copy(d, v, false); };
+  up_f(d_qiqj,qiqj,npairs); up_f(d_rij,rij,npairs); up_f(d_tap,Tap,8);
+  up_f(d_pD,p_D,nt2); up_f(d_palpha,p_alpha,nt2); up_f(d_prvdW,p_rvdW,nt2);
+  up_f(d_pgammaw,p_gammaw,nt2); up_f(d_pecore,p_ecore,nt2); up_f(d_pacore,p_acore,nt2);
+  up_f(d_prcore,p_rcore,nt2); up_f(d_pgamma,p_gamma,nt2); up_f(d_plgcij,p_lgcij,nt2);
+  up_f(d_plgre,p_lgre,nt2);
+  { UCL_H_Vec<int> v; v.view(const_cast<int*>(mtype), npairs, *dev); ucl_copy(d_mtype, v, false); }
 
-  ucl_copy(d_qiqj, h_qiqj, false);
-  ucl_copy(d_rij, h_rij, false);
-  ucl_copy(d_gamma, h_gamma, false);
-  ucl_copy(d_tap, h_tap, false);
-
-  k_reaxff_coul.clear_args();
-  k_reaxff_coul.add_arg(&d_qiqj);
-  k_reaxff_coul.add_arg(&d_rij);
-  k_reaxff_coul.add_arg(&d_gamma);
-  k_reaxff_coul.add_arg(&d_tap);
-  k_reaxff_coul.add_arg(&c_ele);
-  k_reaxff_coul.add_arg(&npairs);
-  k_reaxff_coul.add_arg(&d_eout);
+  k_reaxff_nonbonded.clear_args();
+  k_reaxff_nonbonded.add_arg(&d_qiqj);   k_reaxff_nonbonded.add_arg(&d_rij);
+  k_reaxff_nonbonded.add_arg(&d_mtype);  k_reaxff_nonbonded.add_arg(&d_tap);
+  k_reaxff_nonbonded.add_arg(&d_pD);     k_reaxff_nonbonded.add_arg(&d_palpha);
+  k_reaxff_nonbonded.add_arg(&d_prvdW);  k_reaxff_nonbonded.add_arg(&d_pgammaw);
+  k_reaxff_nonbonded.add_arg(&d_pecore); k_reaxff_nonbonded.add_arg(&d_pacore);
+  k_reaxff_nonbonded.add_arg(&d_prcore); k_reaxff_nonbonded.add_arg(&d_pgamma);
+  k_reaxff_nonbonded.add_arg(&d_plgcij); k_reaxff_nonbonded.add_arg(&d_plgre);
+  k_reaxff_nonbonded.add_arg(&c_ele);    k_reaxff_nonbonded.add_arg(&p_vdW1);
+  k_reaxff_nonbonded.add_arg(&vdw_type); k_reaxff_nonbonded.add_arg(&lgflag);
+  k_reaxff_nonbonded.add_arg(&npairs);   k_reaxff_nonbonded.add_arg(&d_evdw_out);
+  k_reaxff_nonbonded.add_arg(&d_eele_out);
 
   int block_size = 256;
   int grid_size = (npairs + block_size - 1) / block_size;
-  k_reaxff_coul.set_size(grid_size, block_size, this->device->gpu->cq());
-  k_reaxff_coul.run();
-  this->device->gpu->sync();
+  k_reaxff_nonbonded.set_size(grid_size, block_size, dev->cq());
+  k_reaxff_nonbonded.run();
+  dev->sync();
 
-  ucl_copy(h_eout, d_eout, false);
-  double e = 0.0;
-  for (int p = 0; p < npairs; ++p) e += eout[p];
-  return e;
+  std::vector<float> evdw(npairs), eele(npairs);
+  UCL_H_Vec<float> hv, he;
+  hv.view(evdw.data(), npairs, *dev); ucl_copy(hv, d_evdw_out, false);
+  he.view(eele.data(), npairs, *dev); ucl_copy(he, d_eele_out, false);
+  double ev = 0.0, ee = 0.0;
+  for (int p = 0; p < npairs; ++p) { ev += evdw[p]; ee += eele[p]; }
+  e_vdW_out = ev; e_ele_out = ee;
 }
 
 template <class numtyp, class acctyp>
